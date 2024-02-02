@@ -32,7 +32,8 @@ bit_t flip(bit_t b, bool fx, bool fy){
 	}
 	return ret;
 }
-bit_t transpose(bit_t b){
+bit_t transpose(bit_t b, bool t){
+	if(!t) return b;
 	bit_t ret=0;
 	for (int i = 0; i < 16; ++i) {
 		if (b & (bit_t) 1 << i) {
@@ -76,11 +77,71 @@ struct board
 	}
 };
 
+#include <vector>
+struct solver{
+	std::vector<bit_t> lPositions;
+	std::vector<bit_t> sPositions;
+
+	solver() {
+		// generate all 48 positions for an L
+		bit_t p0 = (bit_t) 1 << 0 | (bit_t) 1 << 4 | (bit_t) 1 << 8 | (bit_t) 1 << 9;
+		lPositions.resize(3 * 2 * 2 * 2 * 2);
+		int i = 0;
+		for (int t = 0; t < 2; ++t) {
+			for (int fy = 0; fy < 2; ++fy) {
+				for (int fx = 0; fx < 2; ++fx) {
+					for (int dy = 0; dy < 2; ++dy) {
+						for (int dx = 0; dx < 3; ++dx) {
+							lPositions[i++] = transpose(flip(move(p0, dx, dy), fx, fy), t);
+						}
+					}
+				}
+			}
+		}
+
+		// the 16 positions for a dot
+		sPositions.resize(16);
+		for (int t = 0; t < 16; ++t) {
+			sPositions[t] = (bit_t)1<<t;
+		}
+	}
+
+	void check(fs::path const& filename) const {
+		std::vector<bit_t> ps;
+		for(int i = 0; i< 48;++i){
+			for(int j = 0; j< 48;++j){
+				if((lPositions[i] & lPositions[j]) == 0){
+					ps.push_back(lPositions[i]);
+					ps.push_back(lPositions[j]);
+				}
+			}
+		}
+		toFile(ps,filename);
+	}
+
+	static void toFile(std::vector<bit_t> const& ps, fs::path const& filename) {
+		std::ofstream file(filename);
+		for (bit_t const& s: ps) {
+			for (int i = 0; i < 16; ++i) {
+				if (s & ((bit_t) 1 << i)) {
+					file << (i % 4) << " " << (i / 4) << " ";
+				}
+			}
+			file << "\n";
+		}
+		file.close();
+	}
+
+};
+
 int main() {
 	board b;
 	b.start();
 	std::cout << "valid = " << b.isValid()<<"\n";
 	b.toFile("board.txt");
+
+	solver s;
+	s.check("solver.txt");
 
 	std::cout << "Done!" << std::endl;
 	return 0;
