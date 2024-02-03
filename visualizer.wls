@@ -18,13 +18,10 @@ PlotBoard[board,ImageSize->200]
 
 
 boards=Import[NotebookDirectory[]<>"bin/solver.txt","Table"];
-boards=Partition[#,2]&/@boards;
-boards=Partition[boards,2];
+boards=Partition[boards,4][[All,{1,2}]];
+boards=Map[Partition[#,2]&,boards,{2}];
 boards//Dimensions
 
 
-diagrams=PlotBoard[#]&/@boards[[1;;50]]
+diagrams=PlotBoard[#,ImageSize->100]&/@boards[[1;;-1]];
 Grid@Partition[diagrams,6]
-
-
-
