@@ -10,7 +10,7 @@ Column@board
 
 Clear@PlotBoard;
 PlotBoard[board_,opts_:{}]:=Module[{},
-	cols={Blue,Red,Black,Black}[[1;;Length@board]];
+	cols={Blue,Red,Black}[[1;;Length@board]];
 	Show[MapThread[ArrayPlot[SparseArray[Thread[Reverse[#1,2]+1->1],{4,4}],
 		ColorRules->{0->Transparent,1->#2},opts,Mesh->All]&,{board,cols}]]
 ]
@@ -18,9 +18,15 @@ PlotBoard[board,ImageSize->200]
 
 
 boards=Import[NotebookDirectory[]<>"bin/solver.txt","Table"];
-boards=Partition[boards,4][[All,{1,2}]];
+boards=Partition[boards,3][[All,{1,2,3}]];
 boards=Map[Partition[#,2]&,boards,{2}];
 boards//Dimensions
+
+diagrams=PlotBoard[#,ImageSize->100]&/@boards[[1;;-1]];
+gr=Grid@Partition[diagrams,5]
+
+
+Export[NotebookDirectory[]<>"solutions.png",gr]
 
 
 diagrams=PlotBoard[#,ImageSize->100]&/@boards[[1;;-1]];
