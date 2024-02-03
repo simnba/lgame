@@ -54,6 +54,7 @@ struct board {
 		};
 	};
 	bit_t s = 0;
+	bit_t playerToMove = 0;
 
 	void normalize(){
 		// L-swap symmetry
@@ -69,6 +70,7 @@ struct board {
 		l1 = (bit_t)1<<5 | (bit_t)1<<9 | (bit_t)1<<13 | (bit_t)1<<14;
 		l2 = (bit_t)1<<1 | (bit_t)1<<2 | (bit_t)1<<6 | (bit_t)1<<10;
 		s  = (bit_t)1<<0 | (bit_t)1<<15;
+		playerToMove = 0;
 	}
 	bool isValid() const {
 		bit_t all = l1 | l2 | s;
@@ -95,7 +97,7 @@ struct boardHasher
 {
 	std::size_t operator()(board const& b) const {
 		std::uint64_t all =   (std::uint64_t)b.l1<<48 | (std::uint64_t)b.l2<<32
-							 | (std::uint64_t)b.s;
+							 | (std::uint64_t)b.s<<16 | (std::uint64_t)b.playerToMove;
 		return std::hash<std::uint64_t>()(all);
 	}
 };
@@ -107,12 +109,14 @@ bool operator == (board const& b1, board const& b2){
 
 #include <vector>
 #include <array>
-#include <unordered_set>
+#include <unordered_map>
 #include <bit>
 
 struct solver{
-	std::array<bit_t,48> lPositions;
-	std::array<bit_t,16> sPositions;
+	static constexpr int nLPositions = 3*2*2*2*2;
+	static constexpr int nSPositions = 16;
+	std::array<bit_t,nLPositions> lPositions;
+	std::array<bit_t,nSPositions> sPositions;
 
 	solver() {
 		// generate all 48 positions for an L
@@ -135,24 +139,26 @@ struct solver{
 			sPositions[t] = (bit_t)1<<t;
 		}
 	}
-	void generateFollowups(board const& b, int player, std::vector<board>& out) const {
-		for (int i = 0; i < 48; ++i) {
-			if (lPositions[i] != b.l[player] && !(lPositions[i] & (b.l[1 - player] | b.s))) {
+	void generateFollowups(board const& b, std::vector<board>& out) const {
+		for (int i = 0; i < nLPositions; ++i) {
+			if (lPositions[i] != b.l[b.playerToMove] && !(lPositions[i] & (b.l[1 - b.playerToMove] | b.s))) {
 				board b2 = b;
-				b2.l[player] = lPositions[i];
+				b2.l[b.playerToMove] = lPositions[i];
+				b2.playerToMove = 1-b2.playerToMove;
 
-				for (int u = 0; u < 16; ++u) {
-					for (int v = u+1; v < 16; ++v) {
+				for (int u = 0; u < nSPositions; ++u) {
+					for (int v = u+1; v < nSPositions; ++v) {
 						bit_t s = sPositions[u] | sPositions[v];
-						if(std::popcount(bit_t(s & b2.s))>0) { // if one or zero stones are moved
-							if (!(s & b2.l1) && !(s & b2.l2)) { // if not collision with Ls
+						if(s==1152)
+							int sfkh = 345;
+						if(std::popcount(bit_t(s & b.s))>0) { // if one or zero stones are moved
+							if (!(s & (b2.l1 | b2.l2))) { // if not collision with Ls
 								b2.s = s;
 								out.push_back(b2);
 							}
 						}
 					}
 				}
-
 			}
 		}
 	}
@@ -161,99 +167,190 @@ struct solver{
 		for (int t = 0; t < 2; ++t) {
 			for (int fy = 0; fy < 2; ++fy) {
 				for (int fx = 0; fx < 2; ++fx) {
-					for (int s = 0; s < 1; ++s) { // TODO swap players but keep track of whos turn it is
-						board b2;
+					for (int s = 0; s < 2; ++s) {
+						board& b2 = out[i++];
 						b2.l1 = transpose(flip(b.l1, fx, fy), t);
 						b2.l2 = transpose(flip(b.l2, fx, fy), t);
 						b2.s  = transpose(flip(b.s,  fx, fy), t);
-						if(s) std::swap(b2.l1,b2.l2);
-						out[i++] = b2;
+						b2.playerToMove = b.playerToMove;
+						if(s) {
+							std::swap(b2.l1, b2.l2);
+							b2.playerToMove = 1-b2.playerToMove;
+						}
 					}
 				}
 			}
 		}
 	}
-	void generatePositions(fs::path const& filename) const {
-		std::unordered_set<board, boardHasher> visited;
-		std::vector<board> bs, variants(8), followups;
+	board getNormalForm(board const& b, bool check = true) const {
+		boardHasher h;
+		std::vector<board> variants(16);
+		generateEquivalents(b, variants);
+		board bn = *std::min_element(variants.begin(), variants.end(),
+		                             [&h](board const& l, board const& r) {
+			                             return h(l) < h(r);
+		                             });
+		if(check && bn != getNormalForm(bn,false))
+			std::cout << "oh no \n";
+		return bn;
+	}
+	void generatePositions(fs::path const& filename, fs::path const& networkFilename) const {
+		std::vector<board> bs;
+		std::unordered_map<board, int, boardHasher> visitedIDs;
+
+		std::vector<board> followups;
+		board b;
 		boardHasher h;
 
-//		board b;
-//		b.start();
-//		followups.clear();
-//		generateFollowups(b,0,followups);
-//		std::cout << followups.size() << "\n";
-//
-//		toFile(followups,filename);
-//		return;
+		std::ofstream file(networkFilename);
+
+
+
+		b.l1=71;
+		b.l2=12560;
+		b.s=136;
+		b.playerToMove=1;
+		followups.clear();
+		generateFollowups(b, followups);
 
 
 		int nValid = 0, nRejected = 0;
-		for(int i = 0; i < 48; ++i){
-			for(int j = 0; j < 48; ++j){
-				if((lPositions[i] & lPositions[j]) == 0){
-
-					board b;
+		for(int i = 0; i < nLPositions; ++i) {
+			for(int j = 0; j < nLPositions; ++j) {
+				if(!(lPositions[i] & lPositions[j])) { // if Ls not colliding
 					b.l1 = lPositions[i];
 					b.l2 = lPositions[j];
 
+					// Place single pieces
 					for (int u = 0; u < 16; ++u) {
 						for (int v = u + 1; v < 16; ++v) {
 							bit_t s = sPositions[u] | sPositions[v];
-							if (!(s & (b.l1 | b.l2))) { // if not collision with Ls
+							if (!(s & (b.l1 | b.l2))) { // if not colliding with Ls
+								for (int player = 0; player < 2; ++player) {
+									b.s = s;
+									b.playerToMove = player;
+									nValid++;
 
-								nValid++;
-								b.s = s;
-
-								generateEquivalents(b, variants);
-
-
-								board bn = *std::min_element(variants.begin(), variants.end(),
-								                             [&h](board const& l, board const& r) {
-									                             return h(l) < h(r);
-								                             });
-
-//								if (!visited.contains(bn)) {
-//									bs.push_back(b);
-//									visited.insert(bn);
-//
-//								} else
-//									nRejected++;
-
-
-								if(b == bn) {
+									// Calculate which positions are reachable from here
 									followups.clear();
-									generateFollowups(b,0,followups);
-									if(followups.size() == 0){
-										bs.push_back(b);
-										std::cout << "found one \n";
+									generateFollowups(b, followups);
+
+									board nb = getNormalForm(b);
+
+									if (!visitedIDs.contains(nb)) {
+										bs.push_back(nb);
+										visitedIDs[nb] = bs.size() - 1;
 									}
+									if(h(b)==10132284209008386232)
+										int hgfh = visitedIDs.at(nb);
+									file << visitedIDs.at(nb);
+
+									for (board& f : followups) {
+										board nf = getNormalForm(f);
+										if (!visitedIDs.contains(nf)) {
+											bs.push_back(nf);
+											visitedIDs[nf] = bs.size() - 1;
+										}
+										file << " " << visitedIDs.at(nf);
+									}
+									file << "\n";
+
+
+									// if this is the normal form of the board
+									if (b == nb) {
+
+									}
+									else
+										nRejected++;
 								}
-								else
-									nRejected++;
-
-
 							}
 						}
 					}
 				}
 			}
 		}
+
+		file.close();
+
+
+
+		std::cout << bs[1916].l1 << "\n";
+		std::cout << bs[1916].l2 << "\n";
+		std::cout << bs[1916].s << "\n";
+		std::cout << bs[1916].playerToMove << "\n";
+
+
+		b.l1=71;
+		b.l2=12560;
+		b.s=136;
+		b.playerToMove=1;
+		followups.clear();
+		generateFollowups(b, followups);
+		for(auto f : followups){
+			if(visitedIDs.contains(f)){ // is f normal
+				std::cout << "to normal "<< visitedIDs[f]<<"\n"; // should catch 1917
+			}
+			if(f==bs[1916]){ // is f is 1917
+				std::cout << "found "<< visitedIDs[f]<<"\n"; // should catch 1917
+			}
+		}
+
+		std::vector<board> variants(16);
+		generateEquivalents(bs[1916], variants);
+		for(auto& a : variants)
+			if(visitedIDs.contains(a))
+				std::cout << "shit "<<visitedIDs[a]<<"\n";
+
+
+		std::ofstream f2 ("solver.txt");
+		board pre = bs[1916];
+		pre.playerToMove = 1-pre.playerToMove;
+		followups.clear();
+		generateFollowups(pre,followups);
+		for(auto f : followups){
+			f.playerToMove = 1-f.playerToMove;
+			// f is a pre-state of 1916
+			auto fn = getNormalForm(f);
+			if(visitedIDs.contains(fn)) {
+				std::cout << "prestate is hash " << h(f) << "\n";
+
+				toFile(bs[1916],f2);
+				toFile(f,f2);
+				toFile(fn,f2);
+
+				break;
+			}
+		}
+		f2.close();
+
+//		boardHasher h;
+//		std::sort(bs.begin(), bs.end(),
+//		                             [&h](board const& l, board const& r) {
+//			                             return h(l) < h(r);
+//		                             });
+//		auto last = std::unique(bs.begin(), bs.end());
+//
+//		bs.erase(last,bs.end());
+
 		std::cout << "Accepted " << (nValid-nRejected) << "/" << nValid << "\n";
+		std::cout << "Writing to file: " << bs.size() << "\n";
 		toFile(bs,filename);
 	}
 
+	static void toFile(board const& b, std::ofstream& file) {
+		for (bit_t const& s: {b.l1,b.l2,b.s}) {
+			for (int i = 0; i < 16; ++i) {
+				if (s & ((bit_t) 1 << i)) {
+					file << (i % 4) << " " << (i / 4) << " ";
+				}
+			}
+			file << "\n";
+		}
+	}
 	static void toFile(std::vector<board> const& bs, fs::path const& filename) {
 		std::ofstream file(filename);
 		for (board const& b: bs) {
-			for (bit_t const& s: {b.l1,b.l2,b.s}) {
-				for (int i = 0; i < 16; ++i) {
-					if (s & ((bit_t) 1 << i)) {
-						file << (i % 4) << " " << (i / 4) << " ";
-					}
-				}
-				file << "\n";
-			}
+			toFile(b,file);
 		}
 		file.close();
 	}
@@ -271,7 +368,7 @@ int main() {
 	solver s;
 
 	auto t0 = std::chrono::high_resolution_clock::now();
-	s.generatePositions("solver.txt");
+	s.generatePositions("boards.txt", "network.txt");
 	auto t1 = std::chrono::high_resolution_clock::now();
 
 	std::cout << "Took " << std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() << std::endl;
