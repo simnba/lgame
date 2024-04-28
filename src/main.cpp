@@ -89,7 +89,7 @@ struct board {
 	}
 };
 struct boardHasher{
-	std::size_t operator()(board const& b) const {
+	inline std::size_t operator()(board const& b) const {
 		return b.data;
 		return std::hash<bit4_t>()(b.data);
 	}
@@ -152,7 +152,7 @@ struct solver{
 			}
 		}
 	}
-	void generateEquivalents(board const& b, std::vector<board>& out) const {
+	void generateEquivalents(board const& b, std::array<board,8>& out) const {
 		for (int i = 0, t = 0; t < 2; ++t) {
 			for (int fy = 0; fy < 2; ++fy) {
 				for (int fx = 0; fx < 2; ++fx) {
@@ -165,30 +165,47 @@ struct solver{
 			}
 		}
 	}
+	board generateMinEquivalent(board const& b) const {
+		boardHasher h;
+		board b2, bmin = b;
+		for (int i = 0, t = 0; t < 2; ++t) {
+			for (int fy = 0; fy < 2; ++fy) {
+				for (int fx = 0; fx < 2; ++fx) {
+					b2.l1 = transpose(flip(b.l1, fx, fy), t);
+					b2.l2 = transpose(flip(b.l2, fx, fy), t);
+					b2.s  = transpose(flip(b.s,  fx, fy), t);
+					b2.playerToMove = b.playerToMove;
+					if(h(b2) < h(bmin))
+						bmin=b2;
+				}
+			}
+		}
+		return bmin;
+	}
 
-	board getNormalForm(board  b) const {
+	board getNormalForm(board b) const {
 		if(b.playerToMove) {
 			std::swap(b.l1, b.l2);
 			b.playerToMove = 0;
 		}
 
-		boardHasher h;
-		std::vector<board> variants(8);
-		generateEquivalents(b, variants);
-		board bn = *std::min_element(variants.begin(), variants.end(),
-		                             [&h](board const& l, board const& r) {
-			                             return h(l) < h(r);
-		                             });
+		board bn = generateMinEquivalent(b);
+
+//		boardHasher h;
+//		std::array<board, 8> variants;
+//		generateEquivalents(b, variants);
+//		board bn = *std::min_element(variants.begin(), variants.end(),
+//		                             [&h](board const& l, board const& r) {
+//			                             return h(l) < h(r);
+//		                             });
 		return bn;
 	}
-	void generateGraph(fs::path const& boardsFilename, fs::path const& networkFilename) const {
+	void generateGraph(std::ostream& boardsOut, std::ostream& networkOut) const {
 		std::vector<board> bs;
 		std::unordered_map<board, int, boardHasher> visitedIDs;
 
 		std::vector<board> followups;
 		board b;
-
-		std::ofstream networkFile(networkFilename);
 
 
 		int nValid = 0, nRejected = 0;
@@ -215,7 +232,7 @@ struct solver{
 
 								// exploit the fact that x->y iff T(x)->T(y) for any equivalence transformation T
 								if (b == nb) {
-									networkFile << visitedIDs.at(nb);
+									networkOut << visitedIDs.at(nb);
 
 									// Calculate which positions are reachable from here
 									followups.clear();
@@ -226,9 +243,9 @@ struct solver{
 										if(visitedIDs.try_emplace(nf,bs.size()).second)
 											bs.push_back(nf);
 
-										networkFile << " " << visitedIDs.at(nf);
+										networkOut << " " << visitedIDs.at(nf);
 									}
-									networkFile << "\n";
+									networkOut << "\n";
 								}
 								else {
 									nRejected++;
@@ -242,14 +259,13 @@ struct solver{
 			}
 		}
 
-		networkFile.close();
 
-		std::cout << "Accepted " << (nValid-nRejected) << "/" << nValid << "\n";
-		std::cout << "Writing to file: " << bs.size() << "\n";
-		toFile(bs, boardsFilename);
+		std::cout << std::format("Accepted {}/{}\n", nValid-nRejected, nValid);
+		std::cout << std::format("Writing to file: {}\n", bs.size());
+		toFile(bs, boardsOut);
 	}
 
-	static void toFile(board const& b, std::ofstream& file) {
+	static void toFile(board const& b, std::ostream& file) {
 		for (bit_t const& s: {b.l1,b.l2,b.s}) {
 			for (int i = 0; i < 16; ++i) {
 				if (s & ((bit_t) 1 << i)) {
@@ -259,17 +275,17 @@ struct solver{
 			file << "\n";
 		}
 	}
-	static void toFile(std::vector<board> const& bs, fs::path const& filename) {
-		std::ofstream file(filename);
+	static void toFile(std::vector<board> const& bs, std::ostream& file) {
 		for (board const& b: bs) {
 			toFile(b,file);
 		}
-		file.close();
 	}
 
 };
 
 #include <chrono>
+#include <format>
+#include <sstream>
 
 int main() {
 	board b;
@@ -278,11 +294,23 @@ int main() {
 	b.toFile("board.txt");
 
 	solver s;
+	std::stringstream boardsStream;
+	std::stringstream networkStream;
 
-	auto t0 = std::chrono::high_resolution_clock::now();
-	s.generateGraph("boards.txt", "network.txt");
-	auto t1 = std::chrono::high_resolution_clock::now();
+	using namespace std::chrono;
+	auto t0 = high_resolution_clock::now();
+	for(int i = 0;i< 10; ++i)
+		s.generateGraph(boardsStream, networkStream);
+	auto t1 = high_resolution_clock::now();
 
-	std::cout << "Took " << std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count() << std::endl;
+	// Write to files
+	std::ofstream boardsFile("boards.txt");
+	std::ofstream networkFile("network.txt");
+	boardsFile << boardsStream.rdbuf();
+	networkFile << networkStream.rdbuf();
+	boardsFile.close();
+	networkFile.close();
+
+	std::cout << std::format("Took {} ms\n", duration_cast<microseconds>(t1-t0).count()/1000.f);
 	return 0;
 }
